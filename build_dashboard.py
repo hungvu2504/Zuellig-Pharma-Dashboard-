@@ -452,7 +452,7 @@ TEMPLATE = r'''<!doctype html>
 
   <footer>
     <div style="font-weight:800;color:var(--brand-blue-deep);font-size:13.5px;margin-bottom:4px">IMOJEV — Tiêm liều nhắc, chắc tương lai</div>
-    <div><b>Zuellig Pharma · IMOJEV</b> — Facebook Performance Dashboard · Chỉ hiển thị chỉ số External (giá client).</div>
+    <div><b>Zuellig Pharma · IMOJEV</b> </div>
     <div id="footNote"></div>
   </footer>
 </div>

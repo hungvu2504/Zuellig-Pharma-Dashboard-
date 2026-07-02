@@ -363,16 +363,16 @@ TEMPLATE = r'''<!doctype html>
     <div class="card pad"><div class="defs-top">
       <div class="def"><div class="de">👀</div><div>
         <h4>Lượt hiển thị <small>(Impression)</small></h4>
-        <p>Số lần quảng cáo hiện ra trước mắt mọi người — như có bao nhiêu người đi ngang qua tấm bảng quảng cáo của mình.</p></div></div>
+        <p>Số lần quảng cáo <b>xuất hiện trên màn hình</b> của mọi người. Cùng 1 người lướt thấy 3 lần thì tính 3 lượt — nên đây là số <b>lần hiện ra</b>, chưa phải số người.</p></div></div>
       <div class="def"><div class="de">❤️</div><div>
         <h4>Lượt tương tác <small>(Engagement)</small></h4>
-        <p>Số lần người ta bấm thích, bình luận, chia sẻ với quảng cáo — tức là bao nhiêu người thấy thích và "động tay" tương tác.</p></div></div>
+        <p>Tổng các hành động người ta làm với quảng cáo: thả cảm xúc, chia sẻ, lưu, bình luận, xem video 3 giây, xem ảnh, bấm link, bấm vào trang / theo dõi… — mọi lần ai đó "động tay" vào bài.</p></div></div>
       <div class="def"><div class="de">▶️</div><div>
         <h4>Lượt xem video <small>(View)</small></h4>
         <p>Số lần video được xem đủ lâu (từ 15 giây) — bao nhiêu người chịu dừng lại xem video của mình.</p></div></div>
       <div class="def"><div class="de">👆</div><div>
         <h4>Lượt bấm link <small>(Link Click)</small></h4>
-        <p>Số lần người ta bấm vào đường link để tìm hiểu thêm — bao nhiêu người tò mò muốn biết nhiều hơn.</p></div></div>
+        <p>Số lần người ta bấm vào <b>link trong bài</b> để tới trang đích. Lưu ý: giai đoạn này <b>chưa chạy quảng cáo kéo click (Traffic)</b>, nên các click này là do người xem <b>tự bấm link ngay trong bài</b> nhận biết.</p></div></div>
       <div class="def"><div class="de">💰</div><div>
         <h4>Chi phí <small>(Spending)</small></h4>
         <p>Số tiền đã dùng để chạy quảng cáo cho tới lúc này.</p></div></div>
@@ -452,7 +452,6 @@ TEMPLATE = r'''<!doctype html>
 
   <footer>
     <div style="font-weight:800;color:var(--brand-blue-deep);font-size:13.5px;margin-bottom:4px">IMOJEV — Tiêm liều nhắc, chắc tương lai</div>
-    <div><b>Zuellig Pharma · IMOJEV</b> </div>
     <div id="footNote"></div>
   </footer>
 </div>
@@ -891,7 +890,7 @@ async function loadLive(){
   const banner=document.getElementById('banner');
   if(!DATA_URL){
     ROWS=SNAP.slice();
-    setLive(false, `Nguồn: snapshot nhúng lúc build · ${GENERATED}. &nbsp;`);
+    setLive(false, `Số liệu cập nhật lúc ${GENERATED}`);
     banner.style.display='none';
     render(); return;
   }

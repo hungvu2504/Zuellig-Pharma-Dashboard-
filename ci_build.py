@@ -33,6 +33,8 @@ from googleapiclient.discovery import build as gbuild
 import build_dashboard as bd   # tái dùng TEMPLATE, norm_asset, to_num, iso_date, hằng số
 
 SHEET_ID = os.environ.get('ZP_SHEET_ID', '16AtdH_bp5cN9wGG1t7qmmfdTfNlevY7vVZ9TQ-qrHnY')
+# Meta Ads breakdown (Region/Placement/Age) nằm ở sheet INT — chỉ đọc 3 tab report (KHÔNG đụng cột chi phí)
+INT_SHEET_ID = os.environ.get('ZP_INT_SHEET_ID', '1Ddc4vjylCCnVCYaor5iXE6rgOc-ZIWH86xA0vxu6Jow')
 OUT = os.environ.get('ZP_OUT', 'docs/index.html')
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
@@ -120,11 +122,28 @@ def load_pool(svc):
     return rows
 
 
+def load_report(svc):
+    """Đọc 3 tab Meta breakdown từ sheet INT → aggregate (reuse bd.aggregate_report).
+    Bọc try/except: thiếu tab / mất quyền thì bỏ qua (dashboard vẫn build, chỉ ẩn Section IV)."""
+    def rd(rng):
+        try:
+            vals = svc.spreadsheets().values().get(
+                spreadsheetId=INT_SHEET_ID, range=rng).execute().get('values', [])
+            return _dicts(vals)
+        except Exception as e:
+            print(f'[report] bỏ qua {rng}: {type(e).__name__}: {e}', flush=True)
+            return []
+    r3 = rd("'Raw Data Report (3)'!A1:J300")
+    r4 = rd("'Raw Data Report (4)'!A1:J300")
+    r5 = rd("'Raw Data Report (5)'!A1:J300")
+    return bd.aggregate_report(r3, r4, r5)
+
+
 def main():
     def _fetch():
         svc = gbuild('sheets', 'v4', credentials=creds_from_env())
-        return svc, load_paxy(svc), load_kpi(svc), load_pool(svc)
-    svc, paxy, kpi, pool = with_retry(_fetch)
+        return svc, load_paxy(svc), load_kpi(svc), load_pool(svc), load_report(svc)
+    svc, paxy, kpi, pool, report = with_retry(_fetch)
     dates = sorted({r['date'] for r in paxy})
     meta = {'cpmReach': bd.CPM_REACH, 'cpcTraffic': bd.CPC_TRAFFIC,
             'campaignStart': bd.CAMPAIGN_START, 'campaignEnd': bd.CAMPAIGN_END,
@@ -138,6 +157,7 @@ def main():
     html = html.replace('__KPI_JSON__', json.dumps(kpi, ensure_ascii=False))
     html = html.replace('__META_JSON__', json.dumps(meta, ensure_ascii=False))
     html = html.replace('__POOL_JSON__', json.dumps(pool, ensure_ascii=False))
+    html = html.replace('__REPORT_JSON__', json.dumps(report, ensure_ascii=False))
     html = html.replace('__DATA_URL__', '')     # bản CI = bake snapshot mỗi lần chạy (không cần live-fetch)
     html = html.replace('__GENERATED__', gen)
 
@@ -145,8 +165,10 @@ def main():
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write(html)
     tot = sum(r['impr'] for r in paxy)
+    rep = (f'report[reg={len(report["region"])} plc={len(report["placement"])} age={len(report["age"])}] '
+           f'win={report["window"]["start"]}..{report["window"]["end"]}') if report.get('hasData') else 'report=none'
     print(f'[OK] {OUT} | rows={len(paxy)} | dates={meta["dataMinDate"]}..{meta["dataMaxDate"]} '
-          f'| impr={tot:,.0f} | kpi_combos={len(kpi)} | {gen}')
+          f'| impr={tot:,.0f} | kpi_combos={len(kpi)} | {rep} | {gen}')
 
 
 if __name__ == '__main__':

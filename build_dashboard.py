@@ -26,6 +26,8 @@ ROOT = r'C:\Users\Hung Vu\Downloads\Claude code'
 SHEET_DIR = os.path.join(ROOT, 'sheet_output', 'EXT_Zuellig_Pharma_Media_campaign__16AtdH_b')
 FB_PAXY = os.path.join(SHEET_DIR, 'FB_Paxy.csv')
 KPI_RAW = os.path.join(SHEET_DIR, 'KPI_RAW.csv')
+# Meta Ads breakdown (Region / Placement / Age) — nằm ở sheet INT (chỉ đọc reach/impr/eng, KHÔNG đụng cột chi phí)
+INT_DIR = os.path.join(ROOT, 'sheet_output', 'INT_Zuellig_Pharma_Media_campaign__1Ddc4vjy')
 OUT = os.path.join(ROOT, 'projects', 'zuellig-pharma', 'dashboard', 'dashboard.html')
 
 # ── Buying rates (External / rate card) ──────────────────────────────────────
@@ -133,10 +135,60 @@ def load_pool():
                 {'name': 'Mẹ có con 0–2 tuổi', 'pool': 13800000, 'reach': 0}]
     return rows
 
+# ── Meta Ads breakdown (Region / Placement / Age) ────────────────────────────
+# 3 tab export gốc từ Meta Ads Manager (dán tay vào sheet INT). Cột chung:
+#   <dimension> | Reach | Impressions | Frequency | Post engagements | ThruPlays | Clicks (all) | Reporting starts | Reporting ends
+# LƯU Ý: Reach chỉ cộng được trong chiều LOẠI TRỪ nhau (tỉnh, tuổi); KHÔNG cộng theo placement.
+def aggregate_report(r3, r4, r5):
+    def agg(rows, keycol):
+        d = {}
+        for r in rows:
+            k = (r.get(keycol) or '').strip()
+            if not k:
+                continue
+            a = d.setdefault(k, {'name': k, 'reach': 0.0, 'impr': 0.0, 'eng': 0.0, 'tp': 0.0, 'clk': 0.0})
+            a['reach'] += to_num(r.get('Reach'));            a['impr'] += to_num(r.get('Impressions'))
+            a['eng']   += to_num(r.get('Post engagements')); a['tp']   += to_num(r.get('ThruPlays'))
+            a['clk']   += to_num(r.get('Clicks (all)'))
+        return sorted(d.values(), key=lambda x: -x['impr'])
+
+    def window(rows):
+        s = [(r.get('Reporting starts') or '').strip() for r in rows if (r.get('Reporting starts') or '').strip()]
+        e = [(r.get('Reporting ends')   or '').strip() for r in rows if (r.get('Reporting ends')   or '').strip()]
+        return (min(s) if s else None, max(e) if e else None)
+
+    region    = agg(r3, 'Region')
+    placement = agg(r4, 'Placement')
+    age       = agg(r5, 'Age')
+    ws, we = window(r5 or r4 or r3)
+    tot_impr    = sum(a['impr'] for a in placement) or sum(a['impr'] for a in age)
+    reach_age   = sum(a['reach'] for a in age)      # tuổi loại trừ nhau → xấp xỉ unique reach
+    reach_region = sum(a['reach'] for a in region)  # tỉnh loại trừ nhau → xấp xỉ unique reach
+    return {
+        'window': {'start': ws, 'end': we},
+        'region': region, 'placement': placement, 'age': age,
+        'totals': {'impr': tot_impr, 'reachAge': reach_age, 'reachRegion': reach_region,
+                   'eng': sum(a['eng'] for a in age), 'clk': sum(a['clk'] for a in age),
+                   'freq': (tot_impr / reach_age) if reach_age else 0},
+        'hasData': bool(region or placement or age),
+    }
+
+def load_report():
+    def rd(name):
+        p = os.path.join(INT_DIR, name)
+        if not os.path.exists(p):
+            return []
+        with open(p, encoding='utf-8-sig', newline='') as f:
+            return list(csv.DictReader(f))
+    return aggregate_report(rd('Raw_Data_Report_3.csv'),
+                            rd('Raw_Data_Report_4.csv'),
+                            rd('Raw_Data_Report_5.csv'))
+
 def main():
     paxy = load_paxy()
     kpi = load_kpi()
     pool = load_pool()
+    report = load_report()
     dates = sorted({r['date'] for r in paxy})
     meta = {
         'cpmReach': CPM_REACH, 'cpcTraffic': CPC_TRAFFIC,
@@ -162,6 +214,7 @@ def main():
     html = html.replace('__KPI_JSON__', json.dumps(kpi, ensure_ascii=False))
     html = html.replace('__META_JSON__', json.dumps(meta, ensure_ascii=False))
     html = html.replace('__POOL_JSON__', json.dumps(pool, ensure_ascii=False))
+    html = html.replace('__REPORT_JSON__', json.dumps(report, ensure_ascii=False))
     html = html.replace('__DATA_URL__', data_url.replace('"', '%22'))
     html = html.replace('__GENERATED__', gen)
 
@@ -182,6 +235,13 @@ def main():
     print(f'  rows={len(paxy)}  dates={meta["dataMinDate"]}..{meta["dataMaxDate"]}')
     print(f'  ACTUAL  impr={tot_impr:,.0f}  view={tot_view:,.0f}  click={tot_click:,.0f}  eng={tot_eng:,.0f}')
     print(f'  KPI(FB) budget={kpi_budget:,.0f}  combos={len(kpi)}')
+    if report.get('hasData'):
+        rt = report['totals']
+        print(f'  REPORT  win={report["window"]["start"]}..{report["window"]["end"]}  impr={rt["impr"]:,.0f}  '
+              f'reach(age)={rt["reachAge"]:,.0f}  freq={rt["freq"]:.2f}  '
+              f'[region={len(report["region"])} placement={len(report["placement"])} age={len(report["age"])}]')
+    else:
+        print('  REPORT  (chưa có 3 tab Raw Data Report trong sheet_output INT — chạy read_sheet.py cho sheet INT)')
     print(f'  mode={"LIVE (fetch " + data_url[:48] + "...)" if data_url else "SNAPSHOT (chưa set DATA_URL)"}')
     print(f'  generated={gen}')
 
@@ -344,6 +404,22 @@ TEMPLATE = r'''<!doctype html>
   .lg-row{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:6px 0}
   .lg-sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
   .lg-row b{margin-left:auto;color:var(--zp-ink)}
+
+  /* horizontal bars (region / age breakdown từ Meta report) */
+  .hbar-row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .hbar-lab{width:118px;flex:0 0 auto;font-size:12.5px;font-weight:700;color:var(--zp-charcoal);
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hbar-track{flex:1;height:22px;border-radius:6px;background:var(--track);overflow:hidden;min-width:60px}
+  .hbar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#4E6BAE,#9BB0D8)}
+  .hbar-fill.g{background:linear-gradient(90deg,#B3C42B,#E2E88F)}
+  .hbar-val{width:118px;flex:0 0 auto;text-align:right;font-size:12.5px;font-weight:800}
+  .hbar-val small{color:var(--muted);font-weight:600;font-size:11px}
+  .rep-note{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.55}
+  .rep-win{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .rep-win .tag{background:var(--brand-tint);border:1px solid var(--brand-light);color:#5b6a12;
+                font-weight:800;font-size:12px;padding:6px 13px;border-radius:999px}
+  .freq-big{font-size:44px;font-weight:800;letter-spacing:-1px;color:var(--brand-blue-deep);line-height:1.05}
+  .freq-unit{font-size:15px;font-weight:700;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -461,6 +537,32 @@ TEMPLATE = r'''<!doctype html>
     <div id="cmtDeep"></div>
   </div>
 
+  <!-- IV. Chân dung tiếp cận — Meta Ads breakdown (Region / Placement / Age / Frequency) -->
+  <div class="section" id="secReport">
+    <div class="section-h"><div class="n">IV</div><h2 id="repH">Chân dung tiếp cận — từ báo cáo Meta Ads</h2>
+      <span class="hint" id="repHint"></span></div>
+    <div class="card pad rep-win" id="repWindow" style="margin-bottom:14px"></div>
+    <div class="grid2">
+      <div class="card pad">
+        <div class="mini-h" id="repGeoH">Top tỉnh / thành phố tiếp cận</div>
+        <div id="repGeo"></div>
+        <div class="rep-note" id="repGeoNote"></div>
+      </div>
+      <div class="card pad">
+        <div class="mini-h" id="repPlaceH">Vị trí hiển thị (Placement)</div>
+        <div id="repPlace"></div>
+        <div class="rep-note" id="repPlaceNote"></div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div class="card pad">
+        <div class="mini-h" id="repFreqH">Tần suất — mỗi người thấy mấy lần</div>
+        <div id="repFreq"></div>
+      </div>
+    </div>
+    <div id="cmtReport"></div>
+  </div>
+
   <footer>
     <div id="tagline" style="font-weight:800;color:var(--brand-blue-deep);font-size:13.5px;margin-bottom:4px">IMOJEV — Tiêm liều nhắc, chắc tương lai</div>
     <div id="footNote"></div>
@@ -483,6 +585,7 @@ const POOL_REACH = __POOL_JSON__;
 const SNAP = __DATA_JSON__;
 const KPI  = __KPI_JSON__;
 const META = __META_JSON__;
+const REPORT = __REPORT_JSON__;   // Meta Ads breakdown (Region/Placement/Age) — ảnh chụp cố định
 const GENERATED = "__GENERATED__";
 
 /* ============================ i18n (EN ⇄ VI) ============================ */
@@ -507,6 +610,15 @@ const T = {
   cObjAsset:'Objective / Asset', cBudget:'KPI Budget', cQty:'KPI Qty', cSpend:'Actual Spend', cImpr:'Impression', cClick:'Click', cAchKpi:'Đạt (theo KPI)', cGrand:'GRAND TOTAL',
   cAudAsset:'Audience / Asset', cObj:'Objective', cView:'View', cAch:'Đạt', cPillarAsset:'Pillar / Asset', cView15:'View 15s',
   nx:'Nhận xét', sumBadge:'✓ Chiến dịch đang chạy tốt', updatedAt:'Số liệu cập nhật lúc', liveSrc:'Nguồn LIVE từ Google Sheet · cập nhật lúc',
+  repH:'Chân dung tiếp cận — từ báo cáo Meta Ads', repHint:'Ảnh chụp từ Meta Ads Manager',
+  repGeoH:'Top tỉnh / thành phố tiếp cận', repPlaceH:'Vị trí hiển thị (Placement)',
+  repFreqH:'Tần suất — mỗi người thấy mấy lần',
+  repWinLead:'Số liệu Meta breakdown cho giai đoạn', repWinTail:'(ảnh chụp cố định) · phần còn lại của dashboard cập nhật realtime theo ngày.',
+  repPeople:'người', repImpr:'lượt hiển thị', repReachSub:'người tiếp cận',
+  repGeoNote:'Hà Nội & TP.HCM là 2 đầu tàu tiếp cận; các tỉnh vệ tinh phủ bổ trợ. (Cột = số người tiếp cận / Reach.)',
+  repPlaceNote:'Reels gánh phần lớn lượt hiển thị (đẩy reach), Feed mang lại tương tác cao nhất. (Chia theo lượt hiển thị vì 1 người có thể thấy ở nhiều vị trí.)',
+  repFreqNote:'Mỗi người tiếp cận nhìn thấy IMOJEV trung bình bằng đây lần. Tần suất còn thấp = đang phủ RỘNG người mới, chưa "bội thực" quảng cáo — còn nhiều dư địa nhắc lại ở giai đoạn sau.',
+  repFreqUnit:'lần / người', freqOverall:'Tần suất trung bình',
  },
  en:{
   title:'IMOJEV — Facebook Performance Dashboard', sub:'Zuellig Pharma · IMOJEV campaign · Flight', refresh:'Refresh', langBtn:'VI',
@@ -527,6 +639,15 @@ const T = {
   cObjAsset:'Objective / Asset', cBudget:'KPI Budget', cQty:'KPI Qty', cSpend:'Actual Spend', cImpr:'Impression', cClick:'Click', cAchKpi:'Achieved (vs KPI)', cGrand:'GRAND TOTAL',
   cAudAsset:'Audience / Asset', cObj:'Objective', cView:'View', cAch:'Achieved', cPillarAsset:'Pillar / Asset', cView15:'View 15s',
   nx:'Comment', sumBadge:'✓ Campaign is on track', updatedAt:'Data updated at', liveSrc:'Source: LIVE from Google Sheet · updated at',
+  repH:'Audience reached — from the Meta Ads report', repHint:'Snapshot from Meta Ads Manager',
+  repGeoH:'Top provinces / cities reached', repPlaceH:'Placement',
+  repFreqH:'Frequency — how many times each person saw it',
+  repWinLead:'Meta breakdown for the period', repWinTail:'(fixed snapshot) · the rest of the dashboard updates daily in realtime.',
+  repPeople:'people', repImpr:'impressions', repReachSub:'people reached',
+  repGeoNote:'Hanoi & HCMC are the two reach engines; satellite provinces add supporting coverage. (Bar = people reached / Reach.)',
+  repPlaceNote:'Reels drives most impressions (pushing reach), Feed delivers the highest engagement. (Split by impressions since one person can be reached across placements.)',
+  repFreqNote:'On average each reached person saw IMOJEV this many times. Low frequency = we are reaching BROAD new people, not over-serving ads — plenty of room to reinforce later.',
+  repFreqUnit:'times / person', freqOverall:'Average frequency',
  }
 };
 function tt(k){ return (T[L] && T[L][k]!=null) ? T[L][k] : (T.vi[k]!=null?T.vi[k]:k); }
@@ -551,7 +672,7 @@ function applyStatic(){
   S('hTitle',tt('title')); S('hSub',tt('sub')); S('refreshTxt',tt('refresh')); S('langBtn',tt('langBtn'));
   const rs=document.getElementById('rangeSel'); const rm={all:'rAll',l7d:'rL7d',l14d:'rL14d',mtd:'rMtd',today:'rToday'};
   if(rs)[...rs.options].forEach(o=>{if(rm[o.value])o.textContent=tt(rm[o.value]);});
-  ['defsH','defsHint','poolH','poolHint','trendH','legDaily','legCum','legIdeal','funnelH','donutH','ovH','ovHint','audH','audHint','deepH','deepHint','tagline'].forEach(k=>S(k,tt(k)));
+  ['defsH','defsHint','poolH','poolHint','trendH','legDaily','legCum','legIdeal','funnelH','donutH','ovH','ovHint','audH','audHint','deepH','deepHint','repH','repGeoH','repPlaceH','repFreqH','tagline'].forEach(k=>S(k,tt(k)));
   const dt=document.getElementById('defsTop');
   if(dt) dt.innerHTML=DEFS.map(x=>`<div class="def"><div class="de">${x.ic}</div><div><h4>${x[L].h}</h4><p>${x[L].p}</p></div></div>`).join('');
   document.documentElement.lang=L;
@@ -631,6 +752,7 @@ function render(){
   renderOverview(rows);
   renderAudience(rows);
   renderDeep(rows);
+  renderReport();
   renderCommentary(rows, act, {kReach,kTraffic,kAll});
 
   document.getElementById('trendHint').textContent = rows.length? range.label : tt('noData');
@@ -902,6 +1024,78 @@ function renderPool(){
   }).join('');
 }
 
+/* ============================ IV. META ADS BREAKDOWN ============================ */
+const REGION_MAP = {
+  'Hanoi':{vi:'Hà Nội',en:'Hanoi'},
+  'Ho Chi Minh City':{vi:'TP. Hồ Chí Minh',en:'Ho Chi Minh City'},
+  'Unknown':{vi:'Không xác định',en:'Unknown'},
+};
+function regionName(k){
+  if(REGION_MAP[k]) return REGION_MAP[k][L];
+  return String(k).replace(/\s*Provin(ce)?$/i,'').trim();   // bỏ đuôi "Province"
+}
+function hbar(items, valFn, labFn, green){
+  const max=Math.max(...items.map(valFn),1);
+  const tot=items.reduce((s,x)=>s+valFn(x),0)||1;
+  return items.map(x=>{
+    const v=valFn(x), w=Math.max(3, v/max*100);
+    return `<div class="hbar-row"><div class="hbar-lab" title="${labFn(x)}">${labFn(x)}</div>
+      <div class="hbar-track"><div class="hbar-fill${green?' g':''}" style="width:${w}%"></div></div>
+      <div class="hbar-val">${fmtShort(v)} <small>${fmtPct(v/tot,0)}</small></div></div>`;
+  }).join('');
+}
+function renderReport(){
+  const sec=document.getElementById('secReport'); if(!sec) return;
+  if(!REPORT || !REPORT.hasData){ sec.style.display='none'; return; }
+  sec.style.display='';
+  const win=REPORT.window||{};
+  const winTxt=(win.start&&win.end)?`${vn(win.start)} → ${vn(win.end)}`:'';
+  document.getElementById('repHint').textContent=tt('repHint');
+  document.getElementById('repWindow').innerHTML =
+    `<span class="tag">📅 ${winTxt}</span><span style="font-size:12.5px;color:var(--muted)">${tt('repWinLead')} <b>${winTxt}</b> ${tt('repWinTail')}</span>`;
+
+  // A) Geo — theo Reach (số người, tỉnh loại trừ nhau)
+  const geo=(REPORT.region||[]).filter(x=>x.reach>0).slice(0,8);
+  document.getElementById('repGeo').innerHTML = hbar(geo, x=>x.reach, x=>regionName(x.name), false);
+  document.getElementById('repGeoNote').textContent = tt('repGeoNote');
+
+  // B) Placement — theo Impression (1 người thấy nhiều nơi → dùng impr, donut)
+  renderReportDonut('repPlace', (REPORT.placement||[]).filter(x=>x.impr>0), x=>x.impr, x=>x.name);
+  document.getElementById('repPlaceNote').textContent = tt('repPlaceNote');
+
+  // C) Frequency (full-width)
+  const f=(REPORT.totals&&REPORT.totals.freq)||0;
+  document.getElementById('repFreq').innerHTML =
+    `<div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+       <div style="display:flex;align-items:baseline;gap:10px;flex:0 0 auto">
+         <span class="freq-big">${f.toLocaleString(_loc(),{minimumFractionDigits:1,maximumFractionDigits:1})}</span>
+         <span class="freq-unit">${tt('repFreqUnit')}</span></div>
+       <div class="rep-note" style="flex:1;min-width:240px;margin-top:0">${tt('repFreqNote')}</div>
+     </div>`;
+}
+function renderReportDonut(elId, entries, valFn, labFn){
+  const el=document.getElementById(elId); if(!el) return;
+  entries=entries.slice().sort((a,b)=>valFn(b)-valFn(a));
+  const total=entries.reduce((s,e)=>s+valFn(e),0)||1;
+  // gộp đuôi <2% vào "Khác/Other"
+  const big=[], tail=[];
+  entries.forEach(e=> (valFn(e)/total>=0.02?big:tail).push(e));
+  const tailSum=tail.reduce((s,e)=>s+valFn(e),0);
+  const items=big.map(e=>({name:labFn(e),v:valFn(e)}));
+  if(tailSum>0) items.push({name:(L==='en'?'Other':'Khác'),v:tailSum});
+  const colors=['#4E6BAE','#CADB36','#6C8CC7','#B3C42B','#9BB0D8','#E2E88F','#C7D0E6'];
+  const R=52,C=2*Math.PI*R; let off=0,arcs='',leg='';
+  items.forEach((e,i)=>{const frac=e.v/total,col=colors[i%colors.length],len=frac*C;
+    arcs+=`<circle cx="70" cy="70" r="${R}" fill="none" stroke="${col}" stroke-width="18" stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"><title>${e.name}: ${fmtInt(e.v)} (${fmtPct(frac,1)})</title></circle>`;
+    off+=len;
+    leg+=`<div class="lg-row"><span class="lg-sw" style="background:${col}"></span>${e.name} <b>${fmtPct(frac,1)}</b></div>`;});
+  el.innerHTML=`<div class="donut-flex">
+    <svg viewBox="0 0 140 140" width="150" height="150" style="flex:0 0 auto">${arcs}
+      <text x="70" y="66" text-anchor="middle" font-size="11" fill="#767B6A">${tt('repImpr')}</text>
+      <text x="70" y="85" text-anchor="middle" font-size="15" font-weight="800" fill="#242A15">${fmtShort(total)}</text>
+    </svg><div class="donut-legend">${leg}</div></div>`;
+}
+
 /* ============================ NHẬN XÉT + NEXT ACTION ============================ */
 const PILLAR_VN={'KNOW THE RISK':'Nhận biết nguy cơ bệnh','PROTECT ON TIME':'Bảo vệ con đúng lúc','CLOSE THE GAP':'Tiêm nhắc đúng lịch'};
 const PILLAR_EN={'KNOW THE RISK':'Know the risk','PROTECT ON TIME':'Protect on time','CLOSE THE GAP':'Close the gap'};
@@ -965,6 +1159,20 @@ function renderCommentary(rows, act, k){
   document.getElementById('cmtDeep').innerHTML = cmtBox(EN
     ? `The message <b>"${pillarVN(heroPil)}"</b> attracts viewers best${vrPil.rate>0?` (highest video-view rate, ${fmtPct(vrPil.rate,2)})`:''}. This content angle resonates most with parents.`
     : `Thông điệp <b>"${pillarVN(heroPil)}"</b> đang thu hút người xem tốt nhất${vrPil.rate>0?` (tỉ lệ xem video cao nhất, ${fmtPct(vrPil.rate,2)})`:''}. Đây là hướng nội dung chạm đúng mối quan tâm của phụ huynh.`);
+
+  // ---- IV. Meta Ads breakdown ----
+  const cmtRep=document.getElementById('cmtReport');
+  if(cmtRep && REPORT && REPORT.hasData){
+    const topReg=(REPORT.region||[]).slice().sort((a,b)=>b.reach-a.reach)[0];
+    const topPlc=(REPORT.placement||[]).slice().sort((a,b)=>b.impr-a.impr)[0];
+    const ages=(REPORT.age||[]).slice().sort((a,b)=>b.reach-a.reach);
+    const coreAge=ages.filter(a=>/25-34|35-44|45-54/.test(a.name)).reduce((s,a)=>s+a.reach,0);
+    const totAgeR=(REPORT.totals&&REPORT.totals.reachAge)||ages.reduce((s,a)=>s+a.reach,0)||1;
+    const fr=(REPORT.totals&&REPORT.totals.freq)||0;
+    cmtRep.innerHTML = cmtBox(EN
+      ? `Reach is concentrated in <b>${topReg?regionName(topReg.name):'—'}</b> and other key cities, shown mostly via <b>${topPlc?topPlc.name:'—'}</b>. About <b>${fmtPct(coreAge/totAgeR,0)}</b> of the people reached are parents aged 25–54 — the core decision-makers for their child’s booster shot. Average frequency is still low (<b>${fr.toFixed(1)}×</b>), meaning the budget is buying <b>broad new reach</b> rather than repeating to the same people.`
+      : `Lượng tiếp cận tập trung ở <b>${topReg?regionName(topReg.name):'—'}</b> và các thành phố trọng điểm, hiển thị chủ yếu qua <b>${topPlc?topPlc.name:'—'}</b>. Khoảng <b>${fmtPct(coreAge/totAgeR,0)}</b> người được tiếp cận là phụ huynh 25–54 tuổi — đúng nhóm ra quyết định tiêm nhắc cho con. Tần suất còn thấp (<b>${fr.toFixed(1)} lần</b>), tức ngân sách đang mua <b>tiếp cận người mới trên diện rộng</b> chứ chưa lặp lại vào cùng một nhóm.`);
+  } else if(cmtRep){ cmtRep.innerHTML=''; }
 }
 
 /* ============================ DATA LOADING ============================ */

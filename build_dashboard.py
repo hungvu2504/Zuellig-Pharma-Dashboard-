@@ -946,23 +946,30 @@ function renderOverview(rows){
 }
 
 /* ---- II. Audience x Creative ---- */
+/* Khoá ghép audience = KHOẢNG TUỔI (vd "5-15","0-2") → actual↔KPI ghép được kể cả khi
+   đổi tiền tố tên (Mom→Parents…). Không có range thì fallback về chuỗi thường-hoá. */
+function audKey(a){ const m=String(a||'').match(/(\d+)\s*[-–]\s*(\d+)/); return m ? m[1]+'-'+m[2] : String(a||'').trim().toLowerCase(); }
 function renderAudience(rows){
-  const auds = uniq(KPI.map(k=>k.aud)).filter(a=>a && !/0-15/.test(a)).sort();
+  // Tên hiển thị: ưu tiên tên trong actual/FB_Paxy (tên client-facing anh set), fallback tên KPI.
+  const dispByKey={}; rows.forEach(r=>{const k=audKey(r.aud); if(k && !dispByKey[k]) dispByKey[k]=r.aud;});
+  const auds = uniq(KPI.map(k=>k.aud)).filter(a=>a && !/0[-–]15/.test(a)).sort();
   let html=`<thead><tr><th>${tt('cAudAsset')}</th><th>${tt('cObj')}</th>
      <th>${tt('cQty')}</th><th>${tt('cSpend')}</th><th>${tt('cImpr')}</th><th>${tt('cView')}</th><th>${tt('cClick')}</th><th>${tt('cAch')}</th></tr></thead><tbody>`;
   auds.forEach(aud=>{
-    const aAct=sumMetrics(rows.filter(r=>r.aud===aud));
-    const aK=kpiSum(k=>k.aud===aud);
-    html+=`<tr class="obj-row"><td>${aud}</td><td></td><td>${fmtInt(aK.qty)}</td>
+    const key=audKey(aud);
+    const disp=dispByKey[key]||aud;
+    const aAct=sumMetrics(rows.filter(r=>audKey(r.aud)===key));
+    const aK=kpiSum(k=>audKey(k.aud)===key);
+    html+=`<tr class="obj-row"><td>${disp}</td><td></td><td>${fmtInt(aK.qty)}</td>
       <td>${fmtVND(aAct.spend)}</td><td>${fmtInt(aAct.impr)}</td><td>${fmtInt(aAct.view)}</td><td>${fmtInt(aAct.click)}</td>
       <td>${achMini(aAct.impr, aK.impr)}</td></tr>`;
     // rows by obj+asset within audience that have KPI
-    const combos = KPI.filter(k=>k.aud===aud).map(k=>k.obj+'||'+k.asset);
+    const combos = KPI.filter(k=>audKey(k.aud)===key).map(k=>k.obj+'||'+k.asset);
     uniq(combos).sort().forEach(c=>{
       const [obj,asset]=c.split('||');
-      const rr=rows.filter(r=>r.aud===aud&&r.obj===obj&&r.asset===asset);
+      const rr=rows.filter(r=>audKey(r.aud)===key&&r.obj===obj&&r.asset===asset);
       const a=sumMetrics(rr);
-      const kk=kpiSum(k=>k.aud===aud&&k.obj===obj&&k.asset===asset);
+      const kk=kpiSum(k=>audKey(k.aud)===key&&k.obj===obj&&k.asset===asset);
       const pa=obj==='Reach'?a.impr:a.click, pk=obj==='Reach'?kk.impr:kk.click;
       html+=`<tr><td class="sub-td">&nbsp;&nbsp;&nbsp;${asset}</td>
         <td><span class="pill ${obj.toLowerCase()}">${obj}</span></td>

@@ -1122,7 +1122,7 @@ function renderPool(){
     const pct = p.pool>0 ? clamp01((+p.reach||0)/p.pool) : 0;
     const len=pct*C;
     const ring = has ? `<circle cx="70" cy="70" r="52" fill="none" stroke="#6C8CC7" stroke-width="16" stroke-dasharray="${len} ${C-len}" transform="rotate(-90 70 70)" stroke-linecap="round"/>` : '';
-    const nm = L==='en' ? p.name.replace(/^Mẹ có con /,'Moms with kids ').replace(/ tuổi$/,' y.o.') : p.name;
+    const nm = L==='en' ? p.name.replace(/^(Mẹ|Phụ huynh) có con /,'Parents with kids ').replace(/ tuổi$/,' y.o.') : p.name;
     return `<div class="card pad">
       <div class="mini-h">${nm}</div>
       <div class="donut-flex" style="align-items:center">

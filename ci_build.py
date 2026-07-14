@@ -136,7 +136,8 @@ def load_report(svc):
     def rd_grid(rng):                       # RAW values (list-of-lists) cho pivot Age+Gender
         try:
             return svc.spreadsheets().values().get(
-                spreadsheetId=INT_SHEET_ID, range=rng).execute().get('values', [])
+                spreadsheetId=INT_SHEET_ID, range=rng,
+                valueRenderOption='UNFORMATTED_VALUE').execute().get('values', [])  # rate → số thô 0.0256, không phải "2.56%"
         except Exception as e:
             print(f'[report] bỏ qua {rng}: {type(e).__name__}: {e}', flush=True)
             return []

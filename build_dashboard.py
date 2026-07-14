@@ -51,7 +51,11 @@ def to_num(x):
     if x is None: return 0.0
     s = str(x).strip().replace(',', '')
     if s == '' or s.upper() == '#N/A': return 0.0
-    try: return float(s)
+    pct = s.endswith('%')          # ô rate đọc dạng đã-format "2.56%" → 0.0256
+    if pct: s = s[:-1].strip()
+    try:
+        v = float(s)
+        return v / 100 if pct else v
     except: return 0.0
 
 def iso_date(s):
